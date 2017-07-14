@@ -1,2 +1,2 @@
-mainly distribute project try of github.com/cmu440 
+Distributed system project of github.com/cmu440 
 
