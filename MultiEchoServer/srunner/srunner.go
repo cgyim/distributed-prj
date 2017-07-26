@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/MultiEchoServer/p0"
+	"github.com/cgyim1992/distributed-prj/MultiEchoServer/p0"
 )
 
 const defaultPort = 9999
