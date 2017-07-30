@@ -1,6 +1,12 @@
 package main
 
 
+
+//this is for test in local system
+
+
+
+/*
 import (
 	"github.com/siddontang/go-mysql/replication"
 	"github.com/siddontang/go-mysql/mysql"
