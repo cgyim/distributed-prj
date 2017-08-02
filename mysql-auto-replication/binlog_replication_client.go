@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"net"
 	"time"
-	"fmt"
 )
 // Create a binlog syncer with a unique server id, the server id must be different from other MySQL's.
 // flavor is mysql or mariadb
@@ -26,31 +25,27 @@ const (
 var RotateEvent4Bytes []byte = []byte{0xfe,0x62,0x69,0x6e}
 
 type PostData struct {
-	LogPos  uint32
-	FileName string
+	LogPos  uint32  `json:"size"`
+	FileName string   `json:"file"`   //mysql-bin.000001
+	CommitTime  string `json:"commit_time"`
+	Origin     string  `json:"url"`   //mysql-bin.000001/0
 }
 type Counter struct {
 	Delivered int
 	Failed int
 }
 
-func (c *Counter)WriteDelieverdInfo(conn *client.Conn) error{
-	datestr := time.Now().Format("2006-01-02")
-	_ , err := conn.Execute("update stat set delivered = ?, failed = ?, date = ? where id = 2",c.Delivered,c.Failed,datestr)
-	if err != nil{
-		return err
-	}
-	return nil
-}
 
-func SendToServer(logpos uint32,current_file string, raw *[]byte) []error {
+func SendToServer(logpos uint32,current_file string, commit_time uint32 ,raw *[]byte) []error {
+	ct := strconv.FormatUint(uint64(commit_time),10)
+	logpos_str := strconv.FormatUint(uint64(logpos),10)
 	rq := gorequest.New()
 	_, _, httperr := rq.Post(RemoteServerAddr).
 		Type("multipart").
 	//Send(`{"url": "` + ori_url + `"}`).
 	//Send(`{"file": "` + file + `"}`).
 	//Send(`{"commit_time": "` + commit_time + `"}`).
-		SendStruct(PostData{logpos,current_file}).
+		SendStruct(PostData{logpos,current_file,ct,current_file + "/" +logpos_str}).
 	//Send(data).Set("json_fieldname", `raw`).
 		SendFile(*raw, "", "raw").
 		Retry(HttpRetryTime, HttpRetryInterval).
@@ -61,7 +56,7 @@ func SendToServer(logpos uint32,current_file string, raw *[]byte) []error {
 	}
 	return nil
 }
-func GetLastTimePosition() (*client.Conn, error ,string, uint64){
+func GetLastTimePosition() (error ,string, uint64){
 	conn , err := client.Connect("192.168.33.11:3306","root","","test")
 	if err != nil {
 		panic("Can not Connect to DB!")
@@ -70,11 +65,11 @@ func GetLastTimePosition() (*client.Conn, error ,string, uint64){
 	last_position, _ := r.GetStringByName(0,"latest_url")
 	last_file , last_pos := strings.Split(last_position,"/")[0],strings.Split(last_position,"/")[1]
 	pos , _ := strconv.ParseUint(last_pos,10,32)
-	return conn, nil , last_file , pos
+	return  nil , last_file , pos
 }
 
 
-func (c *Counter)SendEventData(streamer *replication.BinlogStreamer, last_file string) {
+func SendEventData(streamer *replication.BinlogStreamer, last_file string) {
 	Current_Handling_BinFile := last_file
 	Rotate_Bin_File  := ""
 	ROTATE_FORMAT_TO_NEW_FILE := true
@@ -85,12 +80,7 @@ LOOP:
 		if ev.Header.EventType == replication.ROTATE_EVENT  {
 			if ev.Header.LogPos != uint32(0) && ev.Header.Timestamp > uint32(0){ //not a truly new file
 				//Current_FILE.Write(ev.RawData)
-				err := SendToServer(ev.Header.LogPos,Current_Handling_BinFile,&ev.RawData)
-				if err != nil {
-					c.Failed += 1
-				}else {
-					c.Delivered += 1
-				}
+				SendToServer(ev.Header.LogPos,Current_Handling_BinFile,ev.Header.Timestamp,&ev.RawData)
 				continue LOOP
 			}
 			Rotate_Bin_File = string(ev.Event.(*replication.RotateEvent).NextLogName)
@@ -100,7 +90,7 @@ LOOP:
 				ROTATE_FORMAT_TO_NEW_FILE = true
 				Current_Handling_BinFile = Rotate_Bin_File
 				//Current_FILE.Write(RotateEvent4Bytes)
-				SendToServer(uint32(4),Current_Handling_BinFile,&RotateEvent4Bytes)
+				SendToServer(uint32(4),Current_Handling_BinFile,ev.Header.Timestamp,&RotateEvent4Bytes)
 			}else{     //not a new file but a rotate event, all next message
 				// except operation events should be discard
 				ROTATE_FORMAT_TO_NEW_FILE = false
@@ -109,21 +99,11 @@ LOOP:
 
 		}
 		if ev.Header.EventType != replication.FORMAT_DESCRIPTION_EVENT {
-			err := SendToServer(ev.Header.LogPos,Current_Handling_BinFile,&ev.RawData)
-			if err != nil {
-				c.Failed += 1
-			}else {
-				c.Delivered += 1
-			}
+			SendToServer(ev.Header.LogPos,Current_Handling_BinFile,ev.Header.Timestamp,&ev.RawData)
 			ROTATE_FORMAT_TO_NEW_FILE = true
 		}else {
 			if ROTATE_FORMAT_TO_NEW_FILE {
-				err := SendToServer(ev.Header.LogPos,Current_Handling_BinFile,&ev.RawData)
-				if err != nil {
-					c.Failed += 1
-				}else {
-					c.Delivered += 1
-				}
+				SendToServer(ev.Header.LogPos,Current_Handling_BinFile,ev.Header.Timestamp,&ev.RawData)
 			}
 			continue LOOP
 		}
@@ -151,23 +131,13 @@ func main() {
 		User:     "root",
 		Password: "",
 	}
-	ticker := time.NewTicker(time.Second * 15)
-	c := new(Counter)
 	syncer := replication.NewBinlogSyncer(&cfg)
-	conn , _ , last_file, pos := GetLastTimePosition()
-	go func(){
-		for tick:= range ticker.C{
-			err := c.WriteDelieverdInfo(conn)
-			if err != nil{
-				fmt.Println("Connection Issue, Can not Write Delivered Stat!  @  ", tick)
-			}
-		}
-	}()
+	_ , last_file, pos := GetLastTimePosition()
 	// Start sync with specified binlog file and position
 
 	//record  latest position , origin binlog file ,and timestamp into latest;
 	//example:     mysql-bin.000001/1546}
-	streamer, err := syncer.StartSync(mysql.Position{last_file, uint32(pos)})
+	streamer, err := syncer.StartSync(mysql.Position{Name:last_file, Pos:uint32(pos)})
 
 	if err != nil {
 		if err, ok := err.(net.Error); ok && err.Timeout(){
@@ -178,7 +148,7 @@ func main() {
 	// streamer, _ := syncer.StartSyncGTID(gtidSet)
 	// the mysql GTID set likes this "de278ad0-2106-11e4-9f8e-6edd0ca20947:1-2"
 	// the mariadb GTID set likes this "0-1-100"
-	c.SendEventData(streamer,last_file)
+	SendEventData(streamer,last_file)
 }
 
 
