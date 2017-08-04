@@ -6,17 +6,17 @@ import (
 	"github.com/siddontang/go-mysql/mysql"
 	"github.com/parnurzeal/gorequest"
 	"github.com/siddontang/go-mysql/client"
-	"os"
 	"context"
 	"strings"
 	"strconv"
 	"net"
 	"time"
+	"fmt"
 )
 // Create a binlog syncer with a unique server id, the server id must be different from other MySQL's.
 // flavor is mysql or mariadb
 const (
-	RemoteServerAddr string = "http://localhost:9997"
+	RemoteServerAddr string = "http://localhost:8080"
 	HttpRetryTime = 3
 	HttpRetryInterval = 1 * time.Second
 
@@ -29,10 +29,6 @@ type PostData struct {
 	FileName string   `json:"file"`   //mysql-bin.000001
 	CommitTime  string `json:"commit_time"`
 	Origin     string  `json:"url"`   //mysql-bin.000001/0
-}
-type Counter struct {
-	Delivered int
-	Failed int
 }
 
 
@@ -50,14 +46,14 @@ func SendToServer(logpos uint32,current_file string, commit_time uint32 ,raw *[]
 		SendFile(*raw, "", "raw").
 		Retry(HttpRetryTime, HttpRetryInterval).
 		End()
-
+	fmt.Println(logpos,"  ",  current_file, "  ",  ct)
 	if httperr != nil {
 		return httperr
 	}
 	return nil
 }
 func GetLastTimePosition() (error ,string, uint64){
-	conn , err := client.Connect("192.168.33.11:3306","root","","test")
+	conn , err := client.Connect("192.168.33.10:3306","root","","test")
 	if err != nil {
 		panic("Can not Connect to DB!")
 	}
@@ -76,7 +72,6 @@ func SendEventData(streamer *replication.BinlogStreamer, last_file string) {
 LOOP:
 	for {
 		ev, _ := streamer.GetEvent(context.Background())
-		ev.Dump(os.Stdout)
 		if ev.Header.EventType == replication.ROTATE_EVENT  {
 			if ev.Header.LogPos != uint32(0) && ev.Header.Timestamp > uint32(0){ //not a truly new file
 				//Current_FILE.Write(ev.RawData)
@@ -126,7 +121,7 @@ func main() {
 	cfg := replication.BinlogSyncerConfig{
 		ServerID: 1,
 		Flavor:   "mysql",
-		Host:     "192.168.33.11",
+		Host:     "192.168.33.10",
 		Port:     3306,
 		User:     "root",
 		Password: "",
