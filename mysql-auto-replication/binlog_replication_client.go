@@ -59,11 +59,11 @@ func SendToServer(logpos uint32,current_file string,raw *[]byte) []error {
 	return nil
 }
 func GetLastTimePosition() (error ,string, uint64){
-	conn , err := client.Connect("192.168.33.11:3306","root","","cn_archive")
+	conn , err := client.Connect("192.168.33.11:3306","root","","record")
 	if err != nil {
 		panic("Can not Connect to DB!")
 	}
-	r , _ := conn.Execute(`select latest_url from latest where project_id = 2`)
+	r , _ := conn.Execute(`select latest_url from latest where project_id = 1002`)
 	last_file , last_pos := "" , "0"
 	last_position, _ := r.GetStringByName(0,"latest_url")
 	if last_position != "" {
@@ -148,7 +148,7 @@ func main() {
 		Host:     "192.168.33.10",
 		Port:     3306,
 		User:     "root",
-		Password: "",
+		Password: "root",
 	}
 	syncer := replication.NewBinlogSyncer(&cfg)
 	_ , last_file, pos := GetLastTimePosition()
