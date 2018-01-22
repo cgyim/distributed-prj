@@ -1,2 +1,2 @@
-Some distributed systems programs for study and fun, mainly from github.com/cmu440 
+Some programs in golang for education and lab intro for undergraduates in USTC.
 
